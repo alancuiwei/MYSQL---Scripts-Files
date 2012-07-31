@@ -2,14 +2,40 @@
 require 'rubygems'
 require "mysql"
 require 'date'
+require 'dbi'
 
 now=DateTime.now.to_s
 now=now.split('+')[0].gsub(/T/,' ')
+=begin
+dbh = DBI.connect('localhost', 'root', '123456', 'webfuturetest_101') 
+sth=dbh.prepare("select * from todayinfo_t ") 
+sth.execute 
+file = File.new("contract/data.csv", "w+")
+while row=sth.fetch do 
+   file.puts row 
+end 
+file.close()
 
+  dbh=DBI.connect("DBI:Mysql:dbi_development:localhost","root","mypassword")
+  
+  dbh.columns("articles").each do |h|
+    p h
+  end
+=end
 dbh = Mysql.real_connect('localhost', 'root', '123456', 'webfuturetest_101',3306) 
 sth=dbh.prepare("select * from todayinfo_t ") 
 sth.execute 
 file = File.new("contract/data.csv", "w+")
+while row=sth.fetch do 
+   file.puts row 
+end 
+file.close()
+
+
+dbh = Mysql.real_connect('localhost', 'root', '123456', 'futuretest',3306) 
+sth=dbh.prepare("select * from newcontracts_t ") 
+sth.execute 
+file = File.new("contract/newcontracts.csv", "w+")
 while row=sth.fetch do 
    file.puts row 
 end 
@@ -42,7 +68,7 @@ while(i<s)
 end
 file.close()
 
-f=open('../tongtianshun/app/assets/images/contract.xml')             
+f=open('../tongtianshun/app/assets/xmls/contract.xml')             
 f=f.readlines
 s=f.length
 i=0	   
@@ -101,14 +127,31 @@ i+=1
 end
 file.close()
 
+f=open('contract/newcontracts.csv')             
+f=f.readlines
+t=f.length
+
 g=open('contract/comparison.txt')             
 g=g.readlines
 s=g.length
 i=0
-while(i<s) 
-       g[i]='<tr><td>'+g[i].gsub(/,/,'</td><td>')+'</td></tr>'
-       g[i]=g[i].gsub(/<td>NOK/,'<td bgcolor=darkblue>NOK')	   
-       i += 1 
+while(i<s)  
+       a=0      
+       j=0
+       while(j<t)
+         if(g[i].split(',')[0]==f[j].gsub(/\n/,''))
+	        a=1
+	        g[i]='<tr><td>'+g[i].gsub(/,/,'</td><td>')+'</td></tr>'
+            g[i]=g[i].gsub(/<td>NOK/,'<td bgcolor=Yellow>NOK')	
+	        break
+	     end
+	     j +=1
+	   end	  
+	   if(a==0)
+	      g[i]='<tr><td>'+g[i].gsub(/,/,'</td><td>')+'</td></tr>'
+          g[i]=g[i].gsub(/<td>NOK/,'<td bgcolor=darkblue>NOK')	
+       end
+	   i += 1 
 end
 s=s+9 
 g[s-9]='</table>'
@@ -125,7 +168,7 @@ g[4]='</style>'
 g[5]='<tr>'+now+'</tr>'
 g[6]='<table class="rttableformat">'
 g[7]='<tr><th>合约名</th><th>官方保证金比例</th><th>通天顺保证金比例</th><th>比较结果</th><th>官方涨跌停比例</th><th>通天顺涨跌停比例</th><th>比较结果</th></tr>'
-fileHtml = File.new("../tongtianshun/app/views/admin/comparison.html", "w+")
+fileHtml = File.new("../tongtianshun/app/assets/htmls/comparison.html", "w+")
 fileHtml.write 'EF BB BF'.split(' ').map{|a|a.hex.chr}.join()                #写文件时解决中文乱码
 i=0
   while(i<s) 

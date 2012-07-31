@@ -1,12 +1,33 @@
-﻿#! /usr/share/ruby-rvm/bin/ruby
+#! /usr/share/ruby-rvm/bin/ruby
 #encoding:utf-8 
 require "open-uri"
 require 'rubygems'  
 require 'hpricot' 
 require 'mysql'  
+require "iconv"  
+  
+class String  
+  def to_gbk   
+    Iconv.iconv("GBK//IGNORE", "UTF-8//IGNORE", self).to_s   
+  end  
+  
+  def to_utf8   
+    #p "my own string"   
+    Iconv.iconv("UTF-8//IGNORE", "GBK//IGNORE", self).to_s   
+  end  
+  
+  def to_utf8_valid   
+  
+    if !self.valid_encoding?   
+      ic = Iconv.new('UTF-8//IGNORE', 'UTF-8')   
+      return ic.iconv(self)   
+    end  
+    self  
+  end  
+  
+end  
 
-
-open("http://www.gwf.com.cn/cgi/index/First?function=ArticleList&pcatalog_no=Home_Page&menu_id=Trade_Tips"){|x|
+open("http://www.htgwf.com/cgi/index/First?function=ArticleList&pcatalog_no=Home_Page&menu_id=Trade_Tips"){|x|
 aFile = File.new("todayinfo/2.txt","w")
 while line = x.gets                          #打开网页，下载源码存到2.txt
          aFile.puts line.encode("utf-8"); 
@@ -31,13 +52,13 @@ end
 i=0
 while(i<s)                                         #找到最新链接那一行，提取网址
  if( line_array[i].include?('<td><a href="'))
-     u=line_array[i].split('"')[1]
+     u=line_array[i].to_utf8_valid.split('"')[1]
 	break
    end	
    i += 1 
 end  
- f='http://www.gwf.com.cn'+u
- open(f){|x|                                 #同Line  27 ,下载源码存到3.txt
+ f='http://www.htgwf.com'+u
+ open(f){|x|                                 #同Line  11 ,下载源码存到3.txt
 aFile = File.new("todayinfo/3.txt","w")
 while line = x.gets
          aFile.puts line.encode("utf-8")     
@@ -69,8 +90,8 @@ while(i<s)
 end 
 i=0
 while(i<s)                                                   #取时间，Line 467 使用
-     if(l[i].include?("<td")&&l[i].include?('<P>'))
-	        time=l[i].gsub(/.*\(/,'')
+     if(l[i].include?("<td")&&l[i].include?('font14bold')&&l[i].include?('center'))
+	        time=l[i].to_utf8_valid.gsub(/.*\(/,'')
 	        time=time.gsub(/\).*/,'')
 	   break
      end	 
@@ -88,7 +109,7 @@ file.close()
 
 doc = Hpricot(open('todayinfo/newfile.xml'))           #解析xml
 p=doc.search("p").inner_html
-q=p.split("<br />")
+q=p.to_utf8_valid.split("<br />")
 i=0
 while(q[i])             
        i += 1 
@@ -307,7 +328,22 @@ while(f[i])
        i += 1 
 end 
 s=i
-go=open('../tongtianshun/app/assets/images/validcontracts.fl')
+go=open('../tongtianshun/app/assets/xmls/contract.xml')
+g=go.readlines  
+t=g.length
+fileHtml = File.new("todayinfo/1.txt", "w+")
+i=0
+  while(i<t) 
+    if(g[i].include?("contractid"))
+	g[i]=g[i].gsub(/<\/contractid>/,'')
+	g[i]=g[i].gsub(/<contractid>/,'')
+    fileHtml.puts g[i]
+	end
+  i+=1
+  end
+fileHtml.close()
+
+go=open('todayinfo/1.txt')
 g=go.readlines  
 i=0
 while(g[i])             
@@ -375,7 +411,13 @@ while(i<t)
 	 elsif(u=='if')
 	    g[i]=g[i]+','+'股指'
 	 elsif(u=='ag')
-	    g[i]=g[i]+','+'白银'			
+	    g[i]=g[i]+','+'白银'	
+	 elsif(u=='oi')
+	    g[i]=g[i]+','+'菜籽油'	
+	 elsif(u=='wh')
+	    g[i]=g[i]+','+'强麦'	
+	 elsif(u=='ri')
+	    g[i]=g[i]+','+'早籼稻'			
      end
 	j=0
     while(j<s)                                  #合约+品种+交易所
@@ -409,11 +451,11 @@ while(i<t)
     while(f[w][0,10]!='ZhangDieFu')             
          w+=1
     end 
-	a=0
-       if(u=='if')
-	   a=1
-	   end
-	if(a==0)   
+	#a=0
+    #   if(u=='if')
+	#    a=1
+	#   end
+	#if(a==0)   
       v=0
 	    j=0
         while(j<w)                             #合约+品种+交易所+保证金比例
@@ -451,9 +493,14 @@ while(i<t)
 	    end
 	    j+=1
 	    end
-        g[i]=g[i].gsub(/\n/,'')+','+f[j+1]
+        if(j==s)
+		g[i]=g[i].gsub(/\n/,'')+',0'
+		else
+        g[i]=g[i].gsub(/\n/,'')+','+f[j+1]		
+		end
 	   end
-    end
+  #  end
+=begin
 	if(u=='if')
 	  a=0
 	  j=w
@@ -468,6 +515,7 @@ while(i<t)
 		g[i]=g[i].gsub(/\n/,'')+',0,0'
 	  end
 	end
+=end
 	i += 1 
 end 	  
 
@@ -488,7 +536,7 @@ end
 s=i
 i=0
 while(i<s) 
-       g[i]='<tr><td>'+g[i].gsub(/,/,'</td><td>')+'</td></tr>'           
+       g[i]='<tr><td>'+g[i].to_utf8_valid.gsub(/,/,'</td><td>')+'</td></tr>'           
        i += 1 
 end   
 s=s+9 
@@ -508,7 +556,7 @@ g[5]='<tr>'+time+'</tr>'
 g[6]='<table class="rttableformat">'
 g[7]='<tr><th>合约</th><th>品种</th><th>期货交易所</th><th>保证金比例</th><th>涨跌停比例</th></tr>'
 
-fileHtml = File.new("../tongtianshun/app/assets/images/todayinfo.html", "w+")
+fileHtml = File.new("../tongtianshun/app/assets/htmls/todayinfo.html", "w+")
 i=0
   while(i<s) 
     fileHtml.puts g[i]
@@ -532,10 +580,12 @@ dbh.query("set names utf8")
 dbh.query("delete from todayinfo_t")
 i=0
 while(i<s) 
-        a=g[i].split(',')
-        t="insert into todayinfo_t values('"+a[0]+"','"+a[1]+"','"+a[2]+"',"+a[3]+","+a[4]+");"
-        # puts t
-        dbh.query(t)  
+        a=g[i].to_utf8_valid.split(',')
+		if(a[0]!~/\bb\d{4}\b/ && a[0]!~/\bPM\d{3}\b/)
+          t="insert into todayinfo_t values('"+a[0]+"','"+a[1]+"','"+a[2]+"',"+a[3]+","+a[4]+");"
+          # puts t
+          dbh.query(t) 
+        end		
       i += 1 
 end 
 

@@ -1,7 +1,7 @@
 -- MySQL Administrator dump 1.4
 --
 -- ------------------------------------------------------
--- Server version	5.1.61-0ubuntu0.11.10.1
+-- Server version	5.1.41-3ubuntu12.10
 
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
@@ -60,7 +60,7 @@ DECLARE cur_delivercheckday CURSOR FOR SELECT delivercheckday, checkid, deliverm
 DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = true;
 
 
-IF (SELECT in_contractid REGEXP BINARY '^(CF|ER|RO|SR|TA|WS|WT|ME)[0-9]{3}$') THEN
+IF (SELECT in_contractid REGEXP BINARY '^(CF|ER|RO|SR|TA|WS|WT|ME|OI|WH|RI)[0-9]{3}$') THEN
   SET v_datenum=3;
 ELSE
   SET v_datenum=4;
@@ -390,7 +390,7 @@ IF v_volume<=50 THEN
 END IF;
 
 
-IF (SELECT in_firstcontractid REGEXP BINARY '^(CF|ER|RO|SR|TA|WS|WT|ME)[0-9]{3}$') THEN
+IF (SELECT in_firstcontractid REGEXP BINARY '^(CF|ER|RO|SR|TA|WS|WT|ME|OI|WH|RI)[0-9]{3}$') THEN
   SET v_datenum=3;
 ELSE
   SET v_datenum=4;
@@ -634,6 +634,7 @@ DECLARE v_lasttradedate DATE;
 DECLARE v_startdeliverdate DATE;
 DECLARE v_lastdeliverdate DATE;
 DECLARE v_delivermargin FLOAT;
+DECLARE v_exchmargin FLOAT DEFAULT 0;
 DECLARE v_daystolasttradedate INT;
 DECLARE v_daystolastdeliverdate INT;
 DECLARE v_positionmargin FLOAT;
@@ -647,7 +648,7 @@ DECLARE v_lastworkdaycloseprice DOUBLE;
 DECLARE v_lastworkdaysettlementprice DOUBLE;
 DECLARE v_uplimitprice DOUBLE;
 DECLARE v_downlimitprice DOUBLE;
-DECLARE v_thisworkdate DATE; 
+DECLARE v_thisworkdate DATE;
 DECLARE v_lastworkdate DATE;
 DECLARE v_nextworkdate DATE;
 DECLARE v_isvalid BOOL;
@@ -686,93 +687,104 @@ FETCH cur_contract INTO v_contractid;
 REPEAT
   label1:BEGIN
     IF NOT done THEN
-      
+
       CALL computecontractdate_p(v_contractid, v_lasttradedate, v_startdeliverdate, v_lastdeliverdate);
-      
-      
-      IF (SELECT v_contractid REGEXP '^(CF|ER|RO|SR|TA|WS|WT|ME)[0-9]{3}$') THEN
+
+
+      IF (SELECT v_contractid REGEXP '^(CF|ER|RO|SR|TA|WS|WT|ME|OI|WH|RI)[0-9]{3}$') THEN
         SET v_datenum=3;
       ELSE
         SET v_datenum=4;
       END IF;
 
-      
+
       SET v_commodityid = LEFT(v_contractid, LENGTH(v_contractid)-v_datenum );
-      
-      
+
+
       IF(v_commodityid NOT IN (SELECT commodityid FROM validcommodities_t)) THEN
         SET done=false;
         LEAVE label1;
       END IF;
-            
-      
- 
-      
+
+      SET v_exchmargin = (SELECT exchtrademargin FROM commodity_t WHERE commodityid=v_commodityid);
+
+
       IF IFNULL((SELECT errorid FROM thisworkdaymarketdaydata_tmp_t WHERE contractid=v_contractid),0)>0 THEN
         SET v_isvalid=false;
       ELSE
-        SET v_isvalid=true;        
+        SET v_isvalid=true;
       END IF;
 
-      
-      
-      
-      
+
+
+
+
       SET v_daystolasttradedate=(datediff(v_lasttradedate, v_nextworkdate));
-      SET v_daystolastdeliverdate=(datediff(v_startdeliverdate, v_nextworkdate));                       
-                             
-      
-      SET v_delivermargin=IFNULL((SELECT delivermargin FROM contractdelivermargin_t 
-                         WHERE v_nextworkdate>actualdelivercheckdate AND contractid=v_contractid 
+      SET v_daystolastdeliverdate=(datediff(v_startdeliverdate, v_nextworkdate));
+
+
+      SET v_delivermargin=IFNULL((SELECT delivermargin FROM contractdelivermargin_t
+                         WHERE v_nextworkdate>=actualdelivercheckdate AND contractid=v_contractid
                          ORDER BY checkid DESC LIMIT 0,1), 0);
-      
+
       SET v_positionmargin=IFNULL((SELECT positionmargin FROM commoditypositionmargin_t
                          WHERE (positionthreshold*10000)<=(SELECT openinterest FROM thisworkdaymarketdaydata_tmp_t WHERE
                                 contractid=v_contractid)
-                         AND commodityid=v_commodityid 
+                         AND commodityid=v_commodityid
                          ORDER BY checkid DESC LIMIT 0,1), 0);
-      
+
       SET v_uplimitprice=0;
       SET v_downlimitprice=0;
-      
+
       IF (SELECT count(contractid) FROM contract_t WHERE contractid=v_contractid)>0 THEN
-        
+
         SELECT  dailypricelimit, uplimitprice, downlimitprice INTO
                  v_dailypricelimit, v_uplimitprice, v_downlimitprice
                 FROM contract_t WHERE contractid=v_contractid;
-  
-        
-        
+
+
+
         SET v_priceuplimiteddays=0;
         SET v_pricedownlimiteddays=0;
-        
+        SET v_pricelimitmargin=0;
+
         SET v_lastworkdaycloseprice=NULL;
-        SET v_lastworkdaysettlementprice=NULL;  
+        SET v_lastworkdaysettlementprice=NULL;
         SET v_thisworkdaycloseprice=NULL;
-        SET v_thisworkdaysettlementprice=NULL;                             
+        SET v_thisworkdaysettlementprice=NULL;
         SELECT closeprice, settlementprice INTO v_lastworkdaycloseprice, v_lastworkdaysettlementprice FROM lastworkdaymarketdaydata_tmp_t WHERE contractid=v_contractid;
         SELECT closeprice, settlementprice INTO v_thisworkdaycloseprice, v_thisworkdaysettlementprice FROM thisworkdaymarketdaydata_tmp_t WHERE contractid=v_contractid;
-        
-        
-        
-        IF IFNULL((SELECT volume FROM thisworkdaymarketdaydata_tmp_t WHERE 
-                                contractid=v_contractid), 0)=0 THEN
+
+
+
+   #     IF IFNULL((SELECT volume FROM thisworkdaymarketdaydata_tmp_t WHERE
+   #                            contractid=v_contractid), 0)=0 THEN
           SET v_dailypricelimit=(SELECT dailypricelimit FROM commodity_t WHERE commodityid=v_commodityid);
+   #     END IF;
+
+        IF (SELECT count(contractid) FROM newcontracts_t WHERE contractid=v_contractid)>0 THEN
+          IF IFNULL((SELECT volume FROM thisworkdaymarketdaydata_tmp_t WHERE
+                                contractid=v_contractid), 0)=0 THEN
+            SET v_dailypricelimit=(SELECT dailypricelimit FROM commodity_t WHERE commodityid=v_commodityid)*2;
+          ELSE
+            SET v_dailypricelimit=(SELECT dailypricelimit FROM commodity_t WHERE commodityid=v_commodityid);
+            DELETE FROM newcontracts_t WHERE contractid=v_contractid;
+          END IF;
         END IF;
-        
+
         IF v_isvalid=true THEN
-          
+
           IF((v_thisworkdaycloseprice>=v_uplimitprice) AND (v_uplimitprice <> 0)) THEN
-            
+
             SET v_priceuplimiteddays=(SELECT priceuplimiteddays FROM contract_t WHERE contractid=v_contractid)+1;
-            
+
             SELECT exchtrademargin, dailypricelimit INTO v_pricelimitmargin, v_dailypricelimit FROM commoditypricelimit_t
                    WHERE commodityid=v_commodityid AND priceuplimiteddays=v_priceuplimiteddays;
-          
+
           ELSEIF((v_thisworkdaycloseprice<=v_downlimitprice) AND (v_downlimitprice <> 0)) THEN
-            
+
             SET v_pricedownlimiteddays=(SELECT pricedownlimiteddays FROM contract_t WHERE contractid=v_contractid)+1;
-            
+
             SELECT exchtrademargin, dailypricelimit INTO v_pricelimitmargin, v_dailypricelimit FROM commoditypricelimit_t
                    WHERE commodityid=v_commodityid AND priceuplimiteddays=v_pricedownlimiteddays;
 		      ELSE
@@ -786,11 +798,11 @@ REPEAT
             SET v_downlimitprice=TRUNCATE(CEIL((1-v_dailypricelimit)*v_thisworkdaysettlementprice/v_tick)*v_tick,2);
           ELSEIF (v_exchangeid='ZZ') THEN
             SET v_uplimitprice=TRUNCATE(CEIL((1+v_dailypricelimit)*v_thisworkdaysettlementprice/v_tick)*v_tick,2);
-            SET v_downlimitprice=TRUNCATE(FLOOR((1-v_dailypricelimit)*v_thisworkdaysettlementprice/v_tick)*v_tick,2);          
+            SET v_downlimitprice=TRUNCATE(FLOOR((1-v_dailypricelimit)*v_thisworkdaysettlementprice/v_tick)*v_tick,2);
           END IF;
-        END IF; 
-        
-        UPDATE contract_t SET 
+        END IF;
+
+        UPDATE contract_t SET
         commodityid=v_commodityid,
         lasttradedate=v_lasttradedate,
         startdeliverdate=v_startdeliverdate,
@@ -808,14 +820,15 @@ REPEAT
         updateddate=v_thisworkdate,
         isvalid=v_isvalid
         WHERE contractid=v_contractid;
-        
+
         UPDATE  usercontract_t, usercommodity_t SET
-        usercontract_t.contractmarginrate=(GREATEST(v_pricelimitmargin, v_positionmargin, v_delivermargin)
+        usercontract_t.contractmarginrate=(GREATEST(v_pricelimitmargin, v_positionmargin, v_delivermargin, v_exchmargin)
                    + usercommodity_t.trademargingap)
         WHERE usercontract_t.userid=usercommodity_t.userid
-              and contractid=v_contractid 
-              and usercontract_t.commodityid=usercommodity_t.commodityid;                
-      ELSE     
+              and contractid=v_contractid
+              and usercontract_t.commodityid=usercommodity_t.commodityid;
+      ELSE
+        INSERT INTO newcontracts_t VALUES(v_contractid);
         INSERT INTO contract_t(contractid, commodityid, ishavespecpositions, lasttradedate,
         startdeliverdate, lastdeliverdate, delivermargin, daystolasttradedate,
         daystolastdeliverdate, positionmargin, isvalid, priceuplimiteddays, pricedownlimiteddays,
@@ -824,7 +837,7 @@ REPEAT
         v_startdeliverdate, v_lastdeliverdate, v_delivermargin, v_daystolasttradedate,
         v_daystolastdeliverdate, v_positionmargin, v_isvalid, 0, 0,
         0, 0, 0, v_thisworkdate);
-        
+
         UPDATE contract_t, commodity_t
         SET contract_t.tradeunit=commodity_t.tradeunit,
         contract_t.todayexitdiscount=commodity_t.todayexitdiscount,
@@ -832,18 +845,18 @@ REPEAT
         contract_t.exchtrademargin=commodity_t.exchtrademargin,
         contract_t.exchtradechargetype=commodity_t.exchtradechargetype,
         contract_t.exchtradecharge=commodity_t.exchtradecharge,
-        contract_t.dailypricelimit=commodity_t.dailypricelimit
+        contract_t.dailypricelimit=commodity_t.dailypricelimit*2
         WHERE contract_t.commodityid=commodity_t.commodityid AND contract_t.contractid=v_contractid;
         INSERT usercontract_t SELECT v_contractid, userid, v_commodityid, v_isvalid, 0,
            (SELECT lendrate FROM usercommodity_t cm where cm.userid=ur.userid AND cm.commodityid=v_commodityid)
         FROM user_t AS ur;
       END IF;
+      SET done=false;
     END IF;
-    SET done=false;
   END label1;
-  
+
   FETCH NEXT FROM cur_contract INTO v_contractid;
-  
+
 UNTIL done END REPEAT;
 
 
@@ -872,7 +885,7 @@ DELIMITER $$
 
 /*!50003 SET @TEMP_SQL_MODE=@@SQL_MODE, SQL_MODE='' */ $$
 CREATE DEFINER=`root`@`localhost` PROCEDURE `updatecontractbeforemarket_p`()
-BEGIN
+top:BEGIN
 
 DECLARE v_contractid VARCHAR(10);
 DECLARE v_commodityid VARCHAR(4);
@@ -883,6 +896,7 @@ DECLARE v_lasttradedate DATE;
 DECLARE v_startdeliverdate DATE;
 DECLARE v_lastdeliverdate DATE;
 DECLARE v_delivermargin FLOAT;
+DECLARE v_exchmargin FLOAT DEFAULT 0;
 DECLARE v_daystolasttradedate INT;
 DECLARE v_daystolastdeliverdate INT;
 DECLARE v_positionmargin FLOAT;
@@ -907,7 +921,9 @@ DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
 
 
 
-
+IF IFNULL((SELECT isworkday FROM exchangecalendar_t WHERE everydate=CURRENT_DATE),0)<>1 THEN
+  LEAVE top;
+END IF;
 
 
 
@@ -927,90 +943,101 @@ FETCH cur_contract INTO v_contractid;
 REPEAT
   label1:BEGIN
     IF NOT done THEN
-      
+
       CALL computecontractdate_p(v_contractid, v_lasttradedate, v_startdeliverdate, v_lastdeliverdate);
-      
-      
-      IF (SELECT v_contractid REGEXP '^(CF|ER|RO|SR|TA|WS|WT|ME)[0-9]{3}$') THEN
+
+
+      IF (SELECT v_contractid REGEXP '^(CF|ER|RO|SR|TA|WS|WT|ME|OI|WH|RI)[0-9]{3}$') THEN
         SET v_datenum=3;
       ELSE
         SET v_datenum=4;
       END IF;
-      
-      
+
+
       SET v_commodityid = LEFT(v_contractid, LENGTH(v_contractid)-v_datenum );
-      
-      
+
+
       IF(v_commodityid NOT IN (SELECT commodityid FROM validcommodities_t)) THEN
         SET done=false;
         LEAVE label1;
       END IF;
-            
- 
-      
+
+      SET v_exchmargin = (SELECT exchtrademargin FROM commodity_t WHERE commodityid=v_commodityid);
+
       IF IFNULL((SELECT errorid FROM lastworkdaymarketdaydata_tmp_t WHERE contractid=v_contractid),0)>0 THEN
         SET v_isvalid=false;
       ELSE
-        SET v_isvalid=true;        
+        SET v_isvalid=true;
       END IF;
 
-      
-      
-      
-      
+
+
+
+
       SET v_daystolasttradedate=(datediff(v_lasttradedate, CURDATE()));
-      SET v_daystolastdeliverdate=(datediff(v_startdeliverdate, CURDATE()));                       
-                             
-      
-      SET v_delivermargin=IFNULL((SELECT delivermargin FROM contractdelivermargin_t 
-                         WHERE CURDATE()>actualdelivercheckdate AND contractid=v_contractid 
+      SET v_daystolastdeliverdate=(datediff(v_startdeliverdate, CURDATE()));
+
+
+      SET v_delivermargin=IFNULL((SELECT delivermargin FROM contractdelivermargin_t
+                         WHERE CURDATE()>=actualdelivercheckdate AND contractid=v_contractid
                          ORDER BY checkid DESC LIMIT 0,1), 0);
-      
+
       SET v_positionmargin=IFNULL((SELECT positionmargin FROM commoditypositionmargin_t
                          WHERE (positionthreshold*10000)<=(SELECT openinterest FROM lastworkdaymarketdaydata_tmp_t WHERE
                                 contractid=v_contractid)
-                         AND commodityid=v_commodityid 
+                         AND commodityid=v_commodityid
                          ORDER BY checkid DESC LIMIT 0,1), 0);
 
-      
+
       SET v_uplimitprice=0;
       SET v_downlimitprice=0;
       SET v_updateddate=NULL;
-      
+
       IF (SELECT count(contractid) FROM contract_t WHERE contractid=v_contractid)>0 THEN
-        
+
         SELECT  dailypricelimit, uplimitprice, downlimitprice, updateddate INTO
                  v_dailypricelimit, v_uplimitprice, v_downlimitprice, v_updateddate
                 FROM contract_t WHERE contractid=v_contractid;
-  
+
         
         
         SET v_priceuplimiteddays=0;
         SET v_pricedownlimiteddays=0;
+        SET v_pricelimitmargin=0;
         SET v_last2workdaysettlementprice=(SELECT settlementprice FROM last2workdaymarketdaydata_tmp_t WHERE
                                 contractid=v_contractid);
         SET v_lastworkdaycloseprice=NULL;
-        SET v_lastworkdaysettlementprice=NULL;                        
+        SET v_lastworkdaysettlementprice=NULL;
         SELECT closeprice, settlementprice INTO v_lastworkdaycloseprice, v_lastworkdaysettlementprice FROM lastworkdaymarketdaydata_tmp_t WHERE contractid=v_contractid;
-        
-        IF IFNULL((SELECT volume FROM lastworkdaymarketdaydata_tmp_t WHERE 
-                                contractid=v_contractid), 0)=0 THEN
+
+   #     IF IFNULL((SELECT volume FROM lastworkdaymarketdaydata_tmp_t WHERE
+   #                             contractid=v_contractid), 0)=0 THEN
           SET v_dailypricelimit=(SELECT dailypricelimit FROM commodity_t WHERE commodityid=v_commodityid);
+   #    END IF;
+
+        IF (SELECT count(contractid) FROM newcontracts_t WHERE contractid=v_contractid)>0 THEN
+          IF IFNULL((SELECT volume FROM lastworkdaymarketdaydata_tmp_t WHERE
+                                contractid=v_contractid), 0)=0 THEN
+            SET v_dailypricelimit=(SELECT dailypricelimit FROM commodity_t WHERE commodityid=v_commodityid)*2;
+          ELSE
+            SET v_dailypricelimit=(SELECT dailypricelimit FROM commodity_t WHERE commodityid=v_commodityid);
+            DELETE FROM newcontracts_t WHERE contractid=v_contractid;
+          END IF;
         END IF;
-        
+
         IF v_isvalid=true THEN
-          IF(SELECT closeprice FROM lastworkdaymarketdaydata_tmp_t WHERE v_lastworkdaycloseprice>=(1+v_dailypricelimit)*v_last2workdaysettlementprice 
+          IF(SELECT closeprice FROM lastworkdaymarketdaydata_tmp_t WHERE v_lastworkdaycloseprice>=(1+v_dailypricelimit)*v_last2workdaysettlementprice
                      AND contractid=v_contractid) IS NOT NULL THEN
-            
+
             SET v_priceuplimiteddays=(SELECT priceuplimiteddays FROM contract_t WHERE contractid=v_contractid)+1;
-            
+
             SELECT exchtrademargin, dailypricelimit INTO v_pricelimitmargin, v_dailypricelimit FROM commoditypricelimit_t
                    WHERE commodityid=v_commodityid AND priceuplimiteddays=v_priceuplimiteddays;
           ELSEIF (SELECT closeprice FROM lastworkdaymarketdaydata_tmp_t WHERE v_lastworkdaycloseprice<=(1-v_dailypricelimit)*v_last2workdaysettlementprice
                      AND contractid=v_contractid) IS NOT NULL THEN
-            
+
             SET v_pricedownlimiteddays=(SELECT pricedownlimiteddays FROM contract_t WHERE contractid=v_contractid)+1;
-            
+
             SELECT exchtrademargin, dailypricelimit INTO v_pricelimitmargin, v_dailypricelimit FROM commoditypricelimit_t
                    WHERE commodityid=v_commodityid AND priceuplimiteddays=v_pricedownlimiteddays;
           ELSE
@@ -1027,11 +1054,11 @@ REPEAT
             SET v_uplimitprice=TRUNCATE(CEIL((1+v_dailypricelimit)*v_lastworkdaysettlementprice/v_tick)*v_tick,2);
             SET v_downlimitprice=TRUNCATE(FLOOR((1-v_dailypricelimit)*v_lastworkdaysettlementprice/v_tick)*v_tick,2);          
           END IF;
-        END IF; 
+        END IF;
 
-        IF(v_updateddate<>v_lastworkdate) THEN
-        
-        UPDATE contract_t SET 
+
+
+        UPDATE contract_t SET
         commodityid=v_commodityid,
         lasttradedate=v_lasttradedate,
         startdeliverdate=v_startdeliverdate,
@@ -1049,20 +1076,21 @@ REPEAT
         updateddate=v_lastworkdate,
         isvalid=v_isvalid
         WHERE contractid=v_contractid;
-        
+
         UPDATE  usercontract_t, usercommodity_t SET
-        usercontract_t.contractmarginrate=(GREATEST(v_pricelimitmargin, v_positionmargin, v_delivermargin)
+        usercontract_t.contractmarginrate=(GREATEST(v_pricelimitmargin, v_positionmargin, v_delivermargin, v_exchmargin)
                    + usercommodity_t.trademargingap)
         WHERE usercontract_t.userid=usercommodity_t.userid
-              and contractid=v_contractid 
+              and contractid=v_contractid
               and usercontract_t.commodityid=usercommodity_t.commodityid;
-        ELSE
-        UPDATE contract_t SET 
-        isvalid=((v_isvalid) AND (contract_t.isvalid)) 
-        WHERE contractid=v_contractid;        
-        END IF;
-                        
-      ELSE     
+        
+        UPDATE contract_t SET
+        isvalid=((v_isvalid) AND (contract_t.isvalid))
+        WHERE contractid=v_contractid;
+        
+
+      ELSE
+        INSERT INTO newcontracts_t VALUES(v_contractid);
         INSERT INTO contract_t(contractid, commodityid, ishavespecpositions, lasttradedate,
         startdeliverdate, lastdeliverdate, delivermargin, daystolasttradedate,
         daystolastdeliverdate, positionmargin, isvalid, priceuplimiteddays, pricedownlimiteddays,
@@ -1071,7 +1099,7 @@ REPEAT
         v_startdeliverdate, v_lastdeliverdate, v_delivermargin, v_daystolasttradedate,
         v_daystolastdeliverdate, v_positionmargin, v_isvalid, 0, 0,
         0, 0, 0, v_lastworkdate);
-        
+
         UPDATE contract_t, commodity_t
         SET contract_t.tradeunit=commodity_t.tradeunit,
         contract_t.todayexitdiscount=commodity_t.todayexitdiscount,
@@ -1079,15 +1107,16 @@ REPEAT
         contract_t.exchtrademargin=commodity_t.exchtrademargin,
         contract_t.exchtradechargetype=commodity_t.exchtradechargetype,
         contract_t.exchtradecharge=commodity_t.exchtradecharge,
-        contract_t.dailypricelimit=commodity_t.dailypricelimit
+        contract_t.dailypricelimit=commodity_t.dailypricelimit*2
         WHERE contract_t.commodityid=commodity_t.commodityid AND contract_t.contractid=v_contractid;
         INSERT usercontract_t SELECT v_contractid, userid, v_commodityid, v_isvalid, 0,
            (SELECT lendrate FROM usercommodity_t cm where cm.userid=ur.userid AND cm.commodityid=v_commodityid)
         FROM user_t AS ur;
       END IF;
+      SET done = false;
     END IF;
   END label1;
-  
+
   FETCH NEXT FROM cur_contract INTO v_contractid;
   
 UNTIL done END REPEAT;
@@ -1099,7 +1128,7 @@ CLOSE cur_contract;
 DROP TABLE IF EXISTS lastworkdaymarketdaydata_tmp_t;
 DROP TABLE IF EXISTS last2workdaymarketdaydata_tmp_t;
 
-END $$
+END top $$
 /*!50003 SET SESSION SQL_MODE=@TEMP_SQL_MODE */  $$
 
 DELIMITER ;
@@ -1170,7 +1199,7 @@ REPEAT
       CALL computecontractdate_p(v_contractid, v_lasttradedate, v_startdeliverdate, v_lastdeliverdate);
       
       
-      IF (SELECT v_contractid REGEXP '^(CF|ER|RO|SR|TA|WS|WT|ME)[0-9]{3}$') THEN
+      IF (SELECT v_contractid REGEXP '^(CF|ER|RO|SR|TA|WS|WT|ME|OI|WH|RI)[0-9]{3}$') THEN
         SET v_datenum=3;
       ELSE
         SET v_datenum=4;
@@ -1403,7 +1432,7 @@ DELIMITER $$
 
 /*!50003 SET @TEMP_SQL_MODE=@@SQL_MODE, SQL_MODE='' */ $$
 CREATE DEFINER=`root`@`localhost` PROCEDURE `updatepairs_p`()
-BEGIN
+top:BEGIN
 DECLARE v_beforecontractid VARCHAR(10);
 DECLARE v_master1stcontractid VARCHAR(10);
 DECLARE v_master2ndcontractid VARCHAR(10);
@@ -1420,6 +1449,9 @@ DECLARE v_lastworkdate DATE;
 DECLARE cur_contract CURSOR FOR SELECT contractid FROM validcontracts_t ORDER BY contractid;
 DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
 
+IF IFNULL((SELECT isworkday FROM exchangecalendar_t WHERE everydate=CURRENT_DATE),0)<>1 THEN
+  LEAVE top;
+END IF;
 
 DELETE FROM arbitragecontractpairs_t WHERE rightid LIKE '0100010%';
 
@@ -1433,7 +1465,7 @@ OPEN cur_contract;
 FETCH cur_contract INTO v_currentcontractid;
 WHILE NOT done DO
   
-  IF (SELECT v_currentcontractid REGEXP BINARY '^(CF|ER|RO|SR|TA|WS|WT|ME)[0-9]{3}$') THEN
+  IF (SELECT v_currentcontractid REGEXP BINARY '^(CF|ER|RO|SR|TA|WS|WT|ME|OI|WH|RI)[0-9]{3}$') THEN
     SET v_datenum=3;
   ELSE
     SET v_datenum=4;
@@ -1522,7 +1554,7 @@ END WHILE;
 
 CLOSE cur_contract;
 
-END $$
+END top $$
 /*!50003 SET SESSION SQL_MODE=@TEMP_SQL_MODE */  $$
 
 DELIMITER ;
@@ -1535,9 +1567,9 @@ DROP PROCEDURE IF EXISTS `updateserialcotractfromhistory_p`;
 
 DELIMITER $$
 
-/*!50003 SET @TEMP_SQL_MODE=@@SQL_MODE, SQL_MODE='STRICT_TRANS_TABLES,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ $$
+/*!50003 SET @TEMP_SQL_MODE=@@SQL_MODE, SQL_MODE='' */ $$
 CREATE DEFINER=`root`@`localhost` PROCEDURE `updateserialcotractfromhistory_p`(
-IN in_commodityid VARCHAR(4)
+IN in_commodityid1 VARCHAR(4),IN in_commodityid2 VARCHAR(4)
 )
 BEGIN
 
@@ -1554,14 +1586,14 @@ DECLARE v_counter INT DEFAULT 0;
 DECLARE v_done BOOL DEFAULT false;
 DECLARE cur_serialcontract CURSOR FOR SELECT contractid, currentdate, closeprice FROM
        (SELECT contractid, currentdate, closeprice, commodityid FROM marketdaydata_t sub
-              WHERE commodityid=in_commodityid  ORDER BY sub.currentdate, sub.volume DESC ) mst
+              WHERE (commodityid=in_commodityid1 OR commodityid=in_commodityid2)  ORDER BY sub.currentdate, sub.volume DESC ) mst
         GROUP BY mst.currentdate;
 DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = TRUE;
 
 
 DROP TABLE IF EXISTS temprawdata_tmp_t;
 CREATE TEMPORARY TABLE  temprawdata_tmp_t select * from marketdaydata_t
-WHERE commodityid=in_commodityid;
+WHERE (commodityid=in_commodityid1 OR commodityid=in_commodityid2);
 
 
 
@@ -1572,31 +1604,34 @@ SET v_previouscontractmonth=v_currentcontractmonth;
 SET v_pricegap=0;
 WHILE NOT v_done DO
   
-  IF (RIGHT(v_contractmonth,2)=MONTH(v_currentdate)&&(LEFT(RIGHT(v_contractmonth,3),1)=YEAR(v_currentdate)/10)) THEN
-    IF (RIGHT(v_currentcontractmonth,2)=MONTH(v_currentdate)) THEN
+  IF ((RIGHT(v_currentcontractmonth,2)=MONTH(v_currentdate))
+      &&(LEFT(RIGHT(v_contractmonth,3),1)=MOD(YEAR(v_currentdate),10))) THEN
+    
       SET v_currentcontractmonth=(SELECT contractid from temprawdata_tmp_t where
-                         currentdate=v_currentdate order by volume DESC LIMIT 1,1 );
-      SET v_contractmonth=v_currentcontractmonth;
-    END IF;
-    SET v_contractmonth=v_currentcontractmonth;
+                         currentdate=v_currentdate and contractid<>v_currentcontractmonth order by volume DESC LIMIT 0,1 );
+    
+    
+    SET v_contractmonth=v_currentcontractmonth;               
+    SET v_previouscontractmonth=v_currentcontractmonth;
+    SET v_counter=0;
   END IF;
-  
+
   IF(v_counter>0) THEN
     
-    IF(v_counter>=5) THEN
+    IF(v_counter>=5) THEN                                              
       
       SET v_closepricegap=(SELECT after_t.closeprice-before_t.closeprice
            FROM temprawdata_tmp_t as before_t,marketdaydata_t as after_t
            WHERE before_t.contractid=v_contractmonth
            AND after_t.contractid=v_previouscontractmonth
-           AND after_t.currentdate=before_t.currentdate
+           AND after_t.currentdate=before_t.currentdate          
            AND before_t.currentdate<=v_currentdate
            AND after_t.currentdate<=v_currentdate
            ORDER BY before_t.currentdate DESC
            LIMIT 0,1);
       
       SET v_pricegap=v_pricegap+v_closepricegap;
-      SET v_contractmonth=v_previouscontractmonth;
+      SET v_contractmonth=v_previouscontractmonth;               
       SET v_counter=0;
       
       IF(v_previouscontractmonth<>v_currentcontractmonth) THEN
@@ -1610,7 +1645,7 @@ WHILE NOT v_done DO
       SET v_counter=1;
     END IF;
   ELSE
-    
+
     IF(v_previouscontractmonth<>v_currentcontractmonth) THEN
       SET v_counter=1;
     END IF;
@@ -1619,14 +1654,19 @@ WHILE NOT v_done DO
   
   SET v_previouscontractmonth=v_currentcontractmonth;
   IF(SELECT currentdate FROM serialdailydata_t WHERE currentdate=v_currentdate
-            AND commodityid=in_commodityid) IS NOT NULL THEN
+            AND (commodityid=in_commodityid1 OR commodityid=in_commodityid2)) IS NOT NULL THEN
     UPDATE serialdailydata_t
          SET contractmonth=v_contractmonth,
              pricegap=v_pricegap
-         WHERE currentdate=v_currentdate AND commodityid=in_commodityid;
+         WHERE currentdate=v_currentdate AND (commodityid=in_commodityid1 OR commodityid=in_commodityid2);
   ELSE
+   IF(LEFT(v_contractmonth,2)=in_commodityid2) THEN
     INSERT serialdailydata_t(contractmonth, currentdate, commodityid, pricegap)
-         VALUES(v_contractmonth, v_currentdate, in_commodityid, v_pricegap);
+         VALUES(v_contractmonth, v_currentdate, in_commodityid2, v_pricegap);
+	ELSE
+    INSERT serialdailydata_t(contractmonth, currentdate, commodityid, pricegap)
+         VALUES(v_contractmonth, v_currentdate, in_commodityid1, v_pricegap);
+   END IF;
   END IF;
   
   FETCH NEXT FROM cur_serialcontract INTO v_currentcontractmonth, v_currentdate, v_currentcloseprice;
@@ -1638,7 +1678,7 @@ CLOSE cur_serialcontract;
 
 UPDATE serialdailydata_t SET
       serialdailydata_t.pricegap=v_pricegap-pricegap
-      WHERE serialdailydata_t.commodityid=in_commodityid;
+      WHERE (serialdailydata_t.commodityid=in_commodityid1 OR serialdailydata_t.commodityid=in_commodityid2);
       
 UPDATE serialdailydata_t, temprawdata_tmp_t SET
       serialdailydata_t.openprice=temprawdata_tmp_t.openprice-pricegap,
@@ -1647,7 +1687,7 @@ UPDATE serialdailydata_t, temprawdata_tmp_t SET
       serialdailydata_t.closeprice=temprawdata_tmp_t.closeprice-pricegap,
       serialdailydata_t.volume=temprawdata_tmp_t.volume,
       serialdailydata_t.openinterest=temprawdata_tmp_t.openinterest
-      WHERE serialdailydata_t.commodityid=in_commodityid
+      WHERE (serialdailydata_t.commodityid=in_commodityid1 OR serialdailydata_t.commodityid=in_commodityid2)
             AND serialdailydata_t.contractmonth=temprawdata_tmp_t.contractid
             AND serialdailydata_t.currentdate=temprawdata_tmp_t.currentdate;
            
