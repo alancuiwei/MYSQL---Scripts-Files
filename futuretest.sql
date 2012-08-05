@@ -988,6 +988,12 @@ REPEAT
                          AND commodityid=v_commodityid
                          ORDER BY checkid DESC LIMIT 0,1), 0);
 
+      IF (v_commodityid='cu' OR v_commodityid='al' OR v_commodityid='zn' OR v_commodityid='au' OR v_commodityid='rb' OR v_commodityid='wr' OR v_commodityid='rb') AND ((LEFT(RIGHT(v_contractid,4),2)-RIGHT(YEAR(now()),2))*12+RIGHT(v_contractid,2)-3>MONTH(now())) THEN
+      SET v_positionmargin=IFNULL((SELECT positionmargin FROM commoditypositionmargin_t
+                         WHERE checkid=0
+                         AND commodityid=v_commodityid
+                         ORDER BY checkid DESC LIMIT 0,1), 0);
+      END IF;
 
       SET v_uplimitprice=0;
       SET v_downlimitprice=0;
@@ -999,8 +1005,8 @@ REPEAT
                  v_dailypricelimit, v_uplimitprice, v_downlimitprice, v_updateddate
                 FROM contract_t WHERE contractid=v_contractid;
 
-        
-        
+
+
         SET v_priceuplimiteddays=0;
         SET v_pricedownlimiteddays=0;
         SET v_pricelimitmargin=0;
