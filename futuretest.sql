@@ -1657,6 +1657,17 @@ WHILE NOT v_done DO
     END IF;
   END IF;
   
+    IF ((RIGHT(v_contractmonth,2)=MONTH(v_currentdate))
+      &&(LEFT(RIGHT(v_contractmonth,3),1)=MOD(YEAR(v_currentdate),10))) THEN
+    
+      SET v_currentcontractmonth=(SELECT contractid from temprawdata_tmp_t where
+                         currentdate=v_currentdate and contractid<>v_contractmonth order by volume DESC LIMIT 0,1 );
+    
+    
+    SET v_contractmonth=v_currentcontractmonth;
+    SET v_previouscontractmonth=v_currentcontractmonth;
+    SET v_counter=0;
+  END IF;
   
   SET v_previouscontractmonth=v_currentcontractmonth;
   IF(SELECT currentdate FROM serialdailydata_t WHERE currentdate=v_currentdate
