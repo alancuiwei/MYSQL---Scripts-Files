@@ -1659,16 +1659,16 @@ WHILE NOT v_done DO
   
     IF ((RIGHT(v_contractmonth,2)=MONTH(v_currentdate))
       &&(LEFT(RIGHT(v_contractmonth,3),1)=MOD(YEAR(v_currentdate),10))) THEN
-    
+
       SET v_currentcontractmonth=(SELECT contractid from temprawdata_tmp_t where
                          currentdate=v_currentdate and contractid<>v_contractmonth order by volume DESC LIMIT 0,1 );
-    
-    
+
+
     SET v_contractmonth=v_currentcontractmonth;
     SET v_previouscontractmonth=v_currentcontractmonth;
     SET v_counter=0;
   END IF;
-  
+
   SET v_previouscontractmonth=v_currentcontractmonth;
   IF(SELECT currentdate FROM serialdailydata_t WHERE currentdate=v_currentdate
             AND (commodityid=in_commodityid1 OR commodityid=in_commodityid2)) IS NOT NULL THEN
@@ -1677,13 +1677,15 @@ WHILE NOT v_done DO
              pricegap=v_pricegap
          WHERE currentdate=v_currentdate AND (commodityid=in_commodityid1 OR commodityid=in_commodityid2);
   ELSE
-   IF(LEFT(v_contractmonth,2)=in_commodityid2) THEN
-    INSERT serialdailydata_t(contractmonth, currentdate, commodityid, pricegap)
-         VALUES(v_contractmonth, v_currentdate, in_commodityid2, v_pricegap);
-	ELSE
-    INSERT serialdailydata_t(contractmonth, currentdate, commodityid, pricegap)
-         VALUES(v_contractmonth, v_currentdate, in_commodityid1, v_pricegap);
-   END IF;
+      IF(LEFT(v_contractmonth,2)=in_commodityid2 and v_contractmonth IN (SELECT distinct contractid FROM temprawdata_tmp_t WHERE v_currentdate=currentdate)) THEN
+        INSERT serialdailydata_t(contractmonth, currentdate, commodityid, pricegap)
+           VALUES(v_contractmonth, v_currentdate, in_commodityid2, v_pricegap);
+	    ELSE
+        IF(v_contractmonth IN (SELECT distinct contractid FROM temprawdata_tmp_t WHERE v_currentdate=currentdate)) THEN
+         INSERT serialdailydata_t(contractmonth, currentdate, commodityid, pricegap)
+            VALUES(v_contractmonth, v_currentdate, in_commodityid1, v_pricegap);
+        END IF;
+      END IF;
   END IF;
   
   FETCH NEXT FROM cur_serialcontract INTO v_currentcontractmonth, v_currentdate, v_currentcloseprice;
