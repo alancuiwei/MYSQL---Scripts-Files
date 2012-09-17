@@ -1,27 +1,25 @@
-#encoding:utf-8
+﻿#encoding:utf-8
 require 'rubygems'
 require "mysql"
 require "open-uri"
 
-
-#读取数据库
 dbh = Mysql.real_connect('localhost', 'root', '123456', 'futuretest',3306) 
 sth=dbh.prepare("select * from marketdaydata_t ") 
 sth.execute 
-file = File.new("../tongtianshun/app/assets/historydatadownload/daydata/data.txt", "w+")
+file = File.new("daydata/data.txt", "w+")
 while row=sth.fetch do 
    file.puts row 
 end 
 file.close()
 
-h=open('../tongtianshun/app/assets/historydatadownload/daydata/data.txt')                
+h=open('daydata/data.txt')                
 line=h.readlines
 ss=line.length
 j=0	  
 while(j<ss)                       
    g=line[j].gsub(/\n/,'')
    if(g=~/^[a-zA-Z]{1,2}\d{3,4}$/)          
-       gg='../tongtianshun/app/assets/historydatadownload/daydata/'+line[j+10].gsub(/\n/,'')+'/'+g+'.csv'
+       gg='daydata/'+g.gsub(/\d/,'')+'/'+g+'.csv'
 	   if(not File.exist?(gg))
        aFile = File.new(gg,"w") 
        aFile.puts 'Contractid,Date,Open,High,Low,Close,Volume,Openinterest'
@@ -32,7 +30,7 @@ while(j<ss)
 	                      line[j+4].gsub(/\n/,'')+','+line[j+5].gsub(/\n/,'')+','+line[j+6].gsub(/\n/,'')+','+line[j+7].gsub(/\n/,'')
        logfile.close
    end
-  p j=j+1
+   j=j+1
 end
 
 
